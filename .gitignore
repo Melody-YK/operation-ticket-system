@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build outputs
+dist/
+build/
+coverage/
+
+# environment / secrets
+.env
+.env.*
+!.env.example
+
+# local tool config
+.claude/settings.local.json
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+
+# cloned reference powers repo (external source, not part of app)
+powers/
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*

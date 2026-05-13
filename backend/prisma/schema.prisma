@@ -1,0 +1,309 @@
+// ==========================================
+// 操作票管理系统 - Prisma 数据模型
+// 基于 data-model.md 定义（11个实体）
+// Sprint 1 最小闭环版本
+// ==========================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// 枚举定义
+// ==========================================
+
+/// 操作票生命周期状态（10个状态）
+/// 映射自 data-model.md 4.2 节
+enum TicketStatus {
+  DRAFT              @map("draft")              // 建立
+  PENDING_SUPERVISOR @map("pending_supervisor") // 待审核（监护人）
+  PENDING_APPROVER   @map("pending_approver")   // 待审核（批准人）
+  PENDING_DISPATCHER @map("pending_dispatcher") // 待审核（发令人）
+  PENDING_EXECUTE    @map("pending_execute")    // 待执行
+  EXECUTING          @map("executing")          // 执行中
+  SUSPENDED          @map("suspended")          // 中止
+  COMPLETED          @map("completed")          // 已完成
+  VOIDED             @map("voided")             // 作废
+  REJECTED           @map("rejected")           // 建立（驳回）
+
+  @@map("ticket_status")
+}
+
+/// 操作项执行状态
+enum ItemStatus {
+  PENDING   @map("pending")   // 未执行
+  EXECUTING @map("executing") // 执行中
+  COMPLETED @map("completed") // 已完成
+  SKIPPED   @map("skipped")   // 已跳过
+
+  @@map("item_status")
+}
+
+/// 人员角色
+enum PersonnelRole {
+  OPERATOR   @map("operator")
+  SUPERVISOR @map("supervisor")
+  APPROVER   @map("approver")
+  DISPATCHER @map("dispatcher")
+
+  @@map("personnel_role")
+}
+
+/// 审核操作类型
+enum ReviewAction {
+  APPROVE @map("approve")
+  REJECT  @map("reject")
+
+  @@map("review_action")
+}
+
+// ==========================================
+// 核心实体：电子操作票（聚合根）
+// ==========================================
+
+model OperationTicket {
+  // 标识字段
+  ticketId     String   @id @map("ticket_id")
+  taskName     String   @map("task_name")
+
+  // 人员关联（四类角色，严格互斥）
+  operatorId   String   @map("operator_id")
+  supervisorId String   @map("supervisor_id")
+  approverId   String?  @map("approver_id")
+  dispatcherId String?  @map("dispatcher_id")
+
+  // 状态
+  status       TicketStatus @default(DRAFT) @map("status")
+
+  // 业务信息
+  basicInfo    Json?    @map("basic_info")       // 基础信息（班组、区域等）
+  workTicketNo String?  @map("work_ticket_no")   // 关联工作票号
+  remarks      String?  @map("remarks")          // 备注
+
+  // 时间戳
+  dispatchTime DateTime? @map("dispatch_time")   // 下令时间（发令人下达指令时写入）
+  archivedAt   DateTime? @map("archived_at")     // 归档时间
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  // 现场数据（BLOB + JSON）
+  mediaData     Bytes?  @map("media_data")        // 音视频数据（数据库BLOB存储，决策Q6）
+  tagData       Json?   @map("tag_data")          // 标示数据
+  equipmentState Json?  @map("equipment_state")   // 设备状态转换数据
+
+  // 审核签章信息
+  signatureInfo Json?   @map("signature_info")
+
+  // 关系
+  items          OperationItem[]
+  hazards        Hazard[]
+  tools          Tool[]
+  logs           OperationLog[]
+  copies         OperationCopy[]
+  workTicketInfo WorkTicketInfo?
+
+  // 人员关系（通过人员ID关联，不使用外键约束，保持灵活性）
+  // 人员ID在应用层校验
+
+  // 索引
+  @@index([status])
+  @@index([operatorId])
+  @@index([supervisorId])
+  @@index([createdAt])
+  @@index([status, createdAt])
+  @@index([workTicketNo])
+  @@map("operation_tickets")
+}
+
+// ==========================================
+// 操作内容项（值对象，依附于操作票）
+// ==========================================
+
+model OperationItem {
+  itemId       String     @id @default(uuid()) @map("item_id")
+  ticketId     String     @map("ticket_id")
+  stepContent  String     @map("step_content")     // 操作步骤描述
+  sequence     Int        @map("sequence")         // 步骤序号
+  executeStatus ItemStatus @default(PENDING) @map("execute_status")
+  executeResult String?   @map("execute_result")   // 执行结果描述
+  remarks      String?    @map("remarks")
+
+  ticket OperationTicket @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@index([ticketId, sequence])
+  @@unique([ticketId, sequence])
+  @@map("operation_items")
+}
+
+// ==========================================
+// 操作任务副本（派生自电子操作票）
+// ==========================================
+
+model OperationCopy {
+  copyId            String        @id @map("copy_id")          // 格式：CP-YYYYMMDD-XXXXX
+  originalTicketId  String        @map("original_ticket_id")
+  creatorId         String        @map("creator_id")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  executedItems     Json          @map("executed_items")       // 已执行操作内容标记（ID列表）
+  unexecutedItems   Json          @map("unexecuted_items")     // 未执行操作内容标记
+  handoverGroup     String?       @map("handover_group")       // 交接班组
+  handoverPerson    String?       @map("handover_person")      // 交接人
+  newOperatorId     String?       @map("new_operator_id")
+  newSupervisorId   String?       @map("new_supervisor_id")
+  newApproverId     String?       @map("new_approver_id")
+  newDispatcherId   String?       @map("new_dispatcher_id")
+  reviewStatus      String        @default("pending_info") @map("review_status") // 待补充/待审核...
+
+  originalTicket OperationTicket @relation(fields: [originalTicketId], references: [ticketId], onDelete: Restrict)
+
+  @@index([originalTicketId])
+  @@map("operation_copies")
+}
+
+// ==========================================
+// 危险源信息
+// ==========================================
+
+model Hazard {
+  hazardId    String   @id @default(uuid()) @map("hazard_id")
+  ticketId    String   @map("ticket_id")
+  name        String   @map("name")
+  level       String?  @map("level")         // 危险等级
+  measure     String?  @map("measure")       // 防控措施
+  confirmedBy String?  @map("confirmed_by")  // 确认人
+  confirmedAt DateTime? @map("confirmed_at") // 确认时间
+
+  ticket OperationTicket @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("hazards")
+}
+
+// ==========================================
+// 工器具信息
+// ==========================================
+
+model Tool {
+  toolId       String   @id @default(uuid()) @map("tool_id")
+  ticketId     String   @map("ticket_id")
+  name         String   @map("name")
+  model        String?  @map("model")
+  quantity     Int?     @map("quantity")
+  status       String?  @map("status")
+  recipient    String?  @map("recipient")     // 领用人
+  receivedAt   DateTime? @map("received_at")  // 领用时间
+  returnPerson String?  @map("return_person") // 归还人
+  returnedAt   DateTime? @map("returned_at")  // 归还时间
+
+  ticket OperationTicket @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("tools")
+}
+
+// ==========================================
+// 操作日志（审计轨迹）
+// ==========================================
+
+model OperationLog {
+  logId        String   @id @default(uuid()) @map("log_id")
+  ticketId     String   @map("ticket_id")
+  operatorId   String   @map("operator_id")     // 操作人
+  actionNode   String   @map("action_node")     // 操作节点（create/review/dispatch/execute/abort/archive）
+  actionTime   DateTime @default(now()) @map("action_time")
+  actionDetail String?  @map("action_detail")   // 操作内容
+  result       String?  @map("result")          // 操作结果
+  remarks      String?  @map("remarks")
+
+  ticket OperationTicket @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@index([ticketId, actionTime])
+  @@map("operation_logs")
+}
+
+// ==========================================
+// 工作票关联信息
+// ==========================================
+
+model WorkTicketInfo {
+  workTicketNo      String   @id @map("work_ticket_no")
+  ticketId          String   @unique @map("ticket_id")
+  safetyMeasures    String?  @map("safety_measures")    // 安措内容
+  workerId          String?  @map("worker_id")          // 工作负责人ID
+  workerName        String?  @map("worker_name")
+  pushStatus        String?  @map("push_status")        // 推送状态（pending/success/failed）
+  pushTime          DateTime? @map("push_time")
+
+  ticket OperationTicket @relation(fields: [ticketId], references: [ticketId], onDelete: Restrict)
+
+  @@map("work_ticket_info")
+}
+
+// ==========================================
+// 人员实体（四类角色，独立设计）
+// 按决策 Q3 严格互斥：一人只能拥有一个角色
+// ==========================================
+
+model Personnel {
+  personnelId   String        @id @default(uuid()) @map("personnel_id")
+  role          PersonnelRole @map("role")
+  name          String        @map("name")
+  position      String?       @map("position")
+  team          String?       @map("team")
+  department    String?       @map("department")
+  phone         String?       @map("phone")
+  qualification String?       @map("qualification")     // 资质
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  @@unique([personnelId, role])
+  @@index([role])
+  @@index([team])
+  @@map("personnel")
+}
+
+// ==========================================
+// 审核锁定（用于并发审核锁定机制）
+// 基于决策 Q2：先到先得 + 30分钟超时自动释放
+// ==========================================
+
+model ReviewLock {
+  lockId     String     @id @default(uuid()) @map("lock_id")
+  ticketId   String     @map("ticket_id")
+  reviewerId String     @map("reviewer_id")
+  reviewerName String   @map("reviewer_name")
+  lockAt     DateTime   @default(now()) @map("lock_at")
+  expiresAt  DateTime   @map("expires_at")    // 锁定过期时间（lockAt + 30分钟）
+  released   Boolean    @default(false) @map("released")
+
+  @@index([ticketId])
+  @@index([ticketId, released])
+  @@map("review_locks")
+}
+
+// ==========================================
+// 待办事项
+// ==========================================
+
+model Todo {
+  todoId     String   @id @default(uuid()) @map("todo_id")
+  userId     String   @map("user_id")
+  ticketId   String   @map("ticket_id")
+  todoType   String   @map("todo_type")       // review/dispatch/execute/verify/abort
+  title      String   @map("title")
+  message    String?  @map("message")
+  isRead     Boolean  @default(false) @map("is_read")
+  createdAt  DateTime @default(now()) @map("created_at")
+  readAt     DateTime? @map("read_at")
+
+  @@index([userId, isRead])
+  @@index([ticketId])
+  @@map("todos")
+}

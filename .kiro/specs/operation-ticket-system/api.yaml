@@ -1,0 +1,650 @@
+openapi: 3.0.0
+info:
+  title: 操作票管理系统 API
+  version: 1.0.0
+  description: |
+    操作票管理系统 RESTful API 规范
+    覆盖操作票全生命周期管理：建票、审核、指令下达、执行、归档、查询
+  contact:
+    name: 操作票系统开发团队
+    email: dev@example.com
+
+servers:
+  - url: https://api.example.com/v1
+    description: 生产环境
+  - url: https://api-staging.example.com/v1
+    description: 预发布环境
+
+paths:
+  # ============ 操作票管理 ============
+  /tickets:
+    get:
+      summary: 查询操作票列表
+      description: 多条件查询操作票，支持分页
+      operationId: listTickets
+      tags:
+        - 操作票
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: status
+          in: query
+          schema:
+            type: string
+          description: 按状态筛选
+        - name: operator_id
+          in: query
+          schema:
+            type: string
+          description: 按操作人筛选
+        - name: keyword
+          in: query
+          schema:
+            type: string
+          description: 模糊搜索（票号/任务名称）
+        - name: start_date
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 创建时间起始
+        - name: end_date
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 创建时间结束
+      responses:
+        '200':
+          description: 成功返回操作票列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TicketSummary'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      summary: 创建操作票
+      description: 创建新的电子操作票
+      operationId: createTicket
+      tags:
+        - 操作票
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTicketRequest'
+      responses:
+        '201':
+          description: 操作票创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /tickets/{ticketId}:
+    get:
+      summary: 获取操作票详情
+      description: 按票号获取操作票全量信息
+      operationId: getTicket
+      tags:
+        - 操作票
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 操作票详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      summary: 更新操作票
+      description: 更新操作票信息（仅在"建立"状态可编辑）
+      operationId: updateTicket
+      tags:
+        - 操作票
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTicketRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '409':
+          description: 状态不允许修改
+
+  # ============ 送审与审核 ============
+  /tickets/{ticketId}/submit:
+    post:
+      summary: 提交送审
+      description: 操作人提交操作票送审
+      operationId: submitTicket
+      tags:
+        - 审核流程
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 提交成功
+
+  /tickets/{ticketId}/review:
+    post:
+      summary: 提交审核结果
+      description: 审核人提交审核结果（通过/驳回）
+      operationId: submitReview
+      tags:
+        - 审核流程
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - action
+              properties:
+                action:
+                  type: string
+                  enum: [approve, reject]
+                comment:
+                  type: string
+                  description: 驳回意见（驳回时必填）
+      responses:
+        '200':
+          description: 审核结果提交成功
+        '423':
+          description: 操作票已被其他审核人锁定
+
+  # ============ 指令下达 ============
+  /tickets/{ticketId}/dispatch:
+    post:
+      summary: 下达操作指令
+      description: 发令人下达操作指令，写入下令时间并锁定
+      operationId: dispatchTicket
+      tags:
+        - 操作执行
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 指令下达成功
+
+  # ============ 操作执行 ============
+  /tickets/{ticketId}/items:
+    get:
+      summary: 获取操作内容列表
+      operationId: listItems
+      tags:
+        - 操作执行
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 操作内容列表
+
+  /tickets/{ticketId}/items/{itemId}:
+    put:
+      summary: 更新操作项执行状态
+      operationId: updateItemStatus
+      tags:
+        - 操作执行
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [pending, executing, completed, skipped]
+                result:
+                  type: string
+      responses:
+        '200':
+          description: 更新成功
+
+  /tickets/{ticketId}/media:
+    post:
+      summary: 上传现场数据
+      description: 上传音视频、标示、设备状态数据
+      operationId: uploadMedia
+      tags:
+        - 操作执行
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum: [video, audio, tag, equipment_state]
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: 上传成功
+
+  # ============ 中止与副本 ============
+  /tickets/{ticketId}/abort:
+    post:
+      summary: 操作中止
+      description: 发令人确认操作中止
+      operationId: abortTicket
+      tags:
+        - 中止与副本
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - remark
+              properties:
+                remark:
+                  type: string
+      responses:
+        '200':
+          description: 中止成功
+
+  /copies:
+    post:
+      summary: 创建操作副本
+      description: 基于中止的操作票创建续作副本
+      operationId: createCopy
+      tags:
+        - 中止与副本
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - original_ticket_id
+              properties:
+                original_ticket_id:
+                  type: string
+                handover_group:
+                  type: string
+                handover_person:
+                  type: string
+      responses:
+        '201':
+          description: 副本创建成功
+
+  # ============ 校验与归档 ============
+  /tickets/{ticketId}/verify:
+    post:
+      summary: 触发数据校验
+      description: 触发操作票数据总召校验
+      operationId: verifyTicket
+      tags:
+        - 收尾归档
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 校验完成
+
+  /tickets/{ticketId}/archive:
+    post:
+      summary: 归档操作票
+      description: 操作票全量数据归档
+      operationId: archiveTicket
+      tags:
+        - 收尾归档
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 归档成功
+
+  # ============ 统计 ============
+  /statistics/tickets:
+    get:
+      summary: 操作票统计
+      description: 按维度统计操作票数据
+      operationId: getTicketStatistics
+      tags:
+        - 统计
+      parameters:
+        - name: dimension
+          in: query
+          schema:
+            type: string
+            enum: [team, operator, status, time]
+        - name: start_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: 统计结果
+
+  # ============ 人员管理 ============
+  /personnel:
+    get:
+      summary: 查询人员列表
+      operationId: listPersonnel
+      tags:
+        - 人员管理
+      parameters:
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [operator, supervisor, approver, dispatcher]
+      responses:
+        '200':
+          description: 人员列表
+
+    post:
+      summary: 新增人员
+      operationId: createPersonnel
+      tags:
+        - 人员管理
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePersonnelRequest'
+      responses:
+        '201':
+          description: 创建成功
+
+components:
+  schemas:
+    Ticket:
+      type: object
+      properties:
+        ticket_id:
+          type: string
+          example: "OP-20260513-00001"
+        task_name:
+          type: string
+        status:
+          type: string
+          enum: [draft, pending_supervisor, pending_approver, pending_dispatcher, pending_execute, executing, suspended, completed, voided, rejected]
+        operator_id:
+          type: string
+        supervisor_id:
+          type: string
+        approver_id:
+          type: string
+        dispatcher_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        dispatch_time:
+          type: string
+          format: date-time
+        archived_at:
+          type: string
+          format: date-time
+
+    TicketSummary:
+      type: object
+      properties:
+        ticket_id:
+          type: string
+        task_name:
+          type: string
+        status:
+          type: string
+        operator_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CreateTicketRequest:
+      type: object
+      required:
+        - task_name
+        - operator_id
+        - supervisor_id
+      properties:
+        task_name:
+          type: string
+          maxLength: 200
+        operator_id:
+          type: string
+        supervisor_id:
+          type: string
+        approver_id:
+          type: string
+        dispatcher_id:
+          type: string
+        basic_info:
+          type: object
+        work_ticket_no:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperationItemInput'
+        hazards:
+          type: array
+          items:
+            $ref: '#/components/schemas/HazardInput'
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolInput'
+
+    UpdateTicketRequest:
+      type: object
+      properties:
+        task_name:
+          type: string
+        basic_info:
+          type: object
+        work_ticket_no:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperationItemInput'
+
+    OperationItemInput:
+      type: object
+      properties:
+        step_content:
+          type: string
+        sequence:
+          type: integer
+
+    HazardInput:
+      type: object
+      properties:
+        name:
+          type: string
+        level:
+          type: string
+        measure:
+          type: string
+
+    ToolInput:
+      type: object
+      properties:
+        name:
+          type: string
+        model:
+          type: string
+        quantity:
+          type: integer
+
+    CreatePersonnelRequest:
+      type: object
+      required:
+        - name
+        - role
+      properties:
+        name:
+          type: string
+        role:
+          type: string
+          enum: [operator, supervisor, approver, dispatcher]
+        position:
+          type: string
+        team:
+          type: string
+        phone:
+          type: string
+        qualification:
+          type: string
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+  responses:
+    Unauthorized:
+      description: 未认证
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: 服务器内部错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []
