@@ -430,4 +430,153 @@ export class TicketsService {
       allowedActions: allowedEvents,
     };
   }
+
+  // ============================
+  // 执行模块
+  // ============================
+
+  /**
+   * 开始执行：PENDING_EXECUTE → EXECUTING
+   */
+  async startExecute(id: string, userId: string) {
+    return this.transition({ id, userId, event: 'start_execute' });
+  }
+
+  /**
+   * 更新操作项状态（逐条执行/跳过）
+   */
+  async updateItemStatus(id: string, itemId: string, userId: string, action: string) {
+    const ticket = await this.findOne(id);
+
+    if (ticket.status !== 'EXECUTING' && ticket.status !== 'PENDING_EXECUTE') {
+      throw new BadRequestException(
+        `当前状态为「${this.stateMachine.getStatusLabel(ticket.status)}」，不允许执行操作`
+      );
+    }
+
+    // 查找操作项
+    const item = ticket.items?.find((i: any) => i.itemId === itemId);
+    if (!item) throw new BadRequestException('操作项不存在');
+
+    // 校验操作人
+    if (ticket.operatorId !== userId) {
+      throw new BadRequestException('只有操作人可以执行操作');
+    }
+
+    let targetStatus: string;
+    if (action === 'execute') {
+      targetStatus = 'COMPLETED';
+    } else if (action === 'skip') {
+      targetStatus = 'SKIPPED';
+    } else {
+      throw new BadRequestException(`不支持的操作：${action}`);
+    }
+
+    await this.prisma.operationItem.update({
+      where: { itemId },
+      data: {
+        executeStatus: targetStatus as any,
+        executeResult: action === 'skip' ? '已跳过' : '执行完成',
+        remarks: `由 ${userId} 于 ${new Date().toLocaleString('zh-CN')} 执行`,
+      },
+    });
+
+    await this.writeLog({
+      ticketId: id,
+      operatorId: userId,
+      actionNode: 'execute_item',
+      detail: `操作项 ${item.sequence}: ${item.stepContent} → ${targetStatus === 'COMPLETED' ? '执行完成' : '已跳过'}`,
+    });
+
+    return this.findOne(id);
+  }
+
+  /**
+   * 完成执行：EXECUTING → COMPLETED
+   */
+  async completeExecution(id: string, userId: string) {
+    const ticket = await this.findOne(id);
+
+    // 检查是否所有必执行项已完成
+    const incompleteItems = ticket.items?.filter(
+      (i: any) => i.executeStatus === 'PENDING' || i.executeStatus === 'EXECUTING'
+    );
+    if (incompleteItems?.length > 0) {
+      throw new BadRequestException(
+        `还有 ${incompleteItems.length} 项操作未执行，请先完成所有操作`
+      );
+    }
+
+    return this.transition({ id, userId, event: 'complete' });
+  }
+
+  /**
+   * 数据校验：COMPLETED → verify_pass / verify_fail
+   */
+  async verify(id: string, userId: string, action: string, comment?: string) {
+    if (action !== 'verify_pass' && action !== 'verify_fail') {
+      throw new BadRequestException('校验操作仅支持 verify_pass / verify_fail');
+    }
+
+    const event = action === 'verify_pass' ? 'verify_pass' : 'verify_fail';
+    return this.transition({ id, userId, event, comment });
+  }
+
+  /**
+   * 上传现场数据
+   */
+  async uploadMedia(id: string, userId: string, mediaData: any) {
+    const ticket = await this.findOne(id);
+    if (ticket.status !== 'EXECUTING') {
+      throw new BadRequestException('仅执行中的操作票可上传现场数据');
+    }
+
+    const updated = await this.prisma.operationTicket.update({
+      where: { ticketId: id },
+      data: { mediaData: mediaData as any },
+    });
+
+    await this.writeLog({
+      ticketId: id,
+      operatorId: userId,
+      actionNode: 'upload_media',
+      detail: '上传现场数据',
+    });
+
+    return updated;
+  }
+
+  /**
+   * 获取操作时间线
+   */
+  async getTimeline(id: string) {
+    const ticket = await this.prisma.operationTicket.findUnique({
+      where: { ticketId: id },
+      include: {
+        logs: { orderBy: { actionTime: 'asc' } },
+        items: { orderBy: { sequence: 'asc' } },
+      },
+    });
+    if (!ticket) throw new NotFoundException('操作票不存在');
+
+    return {
+      ticketId: ticket.ticketId,
+      status: ticket.status,
+      logs: ticket.logs.map((log: any) => ({
+        logId: log.logId,
+        actionNode: log.actionNode,
+        operatorId: log.operatorId,
+        actionTime: log.actionTime,
+        actionDetail: log.actionDetail,
+        result: log.result,
+      })),
+      items: ticket.items.map((item: any) => ({
+        itemId: item.itemId,
+        sequence: item.sequence,
+        stepContent: item.stepContent,
+        executeStatus: item.executeStatus,
+        executeResult: item.executeResult,
+      })),
+    };
+  }
 }

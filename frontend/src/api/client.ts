@@ -148,6 +148,46 @@ class ApiClient {
       body: JSON.stringify({}),
     });
   }
+
+  // ===== 执行模块 =====
+  async startExecute(id: string) {
+    return this.request<any>(`/tickets/${id}/start-execute`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  async updateItemStatus(id: string, itemId: string, action: string) {
+    return this.request<any>(`/tickets/${id}/items/${itemId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ action }),
+    });
+  }
+
+  async completeExecution(id: string) {
+    return this.request<any>(`/tickets/${id}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  async verifyTicket(id: string, action: string, comment?: string) {
+    return this.request<any>(`/tickets/${id}/verify`, {
+      method: 'POST',
+      body: JSON.stringify({ action, comment }),
+    });
+  }
+
+  async uploadMedia(id: string, data: any) {
+    return this.request<any>(`/tickets/${id}/media`, {
+      method: 'PUT',
+      body: JSON.stringify({ data }),
+    });
+  }
+
+  async getTimeline(id: string) {
+    return this.request<any>(`/tickets/${id}/timeline`);
+  }
 }
 
 export const api = new ApiClient();

@@ -8,6 +8,8 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { ReviewTicketDto } from './dto/review-ticket.dto';
 import { ResubmitTicketDto } from './dto/resubmit-ticket.dto';
+import { UpdateItemDto } from './dto/update-item.dto';
+import { VerifyTicketDto } from './dto/verify-ticket.dto';
 
 @Controller('tickets')
 @UseGuards(AuthGuard('jwt'))
@@ -73,5 +75,42 @@ export class TicketsController {
   @Get(':id/status')
   async getStatus(@Param('id') id: string) {
     return this.ticketsService.getStatusInfo(id);
+  }
+
+  // ===== 执行模块 =====
+
+  @Post(':id/start-execute')
+  async startExecute(@Param('id') id: string, @Req() req: any) {
+    return this.ticketsService.startExecute(id, req.user.id);
+  }
+
+  @Put(':id/items/:itemId')
+  async updateItemStatus(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: UpdateItemDto,
+    @Req() req: any,
+  ) {
+    return this.ticketsService.updateItemStatus(id, itemId, req.user.id, dto.action);
+  }
+
+  @Post(':id/complete')
+  async completeExecution(@Param('id') id: string, @Req() req: any) {
+    return this.ticketsService.completeExecution(id, req.user.id);
+  }
+
+  @Post(':id/verify')
+  async verify(@Param('id') id: string, @Body() dto: VerifyTicketDto, @Req() req: any) {
+    return this.ticketsService.verify(id, req.user.id, dto.action, dto.comment);
+  }
+
+  @Put(':id/media')
+  async uploadMedia(@Param('id') id: string, @Body('data') mediaData: any, @Req() req: any) {
+    return this.ticketsService.uploadMedia(id, req.user.id, mediaData);
+  }
+
+  @Get(':id/timeline')
+  async getTimeline(@Param('id') id: string) {
+    return this.ticketsService.getTimeline(id);
   }
 }

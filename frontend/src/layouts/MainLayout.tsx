@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { ROLE_LABELS } from '../utils/constants';
+import { NetworkStatus } from '../components/NetworkStatus';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
@@ -31,7 +32,8 @@ export function MainLayout() {
     { key: '/tickets/query', icon: <SearchOutlined />, label: '查询操作票', showFor: ['OPERATOR', 'SUPERVISOR', 'APPROVER', 'DISPATCHER'] },
   ].filter(item => item.showFor.includes(role));
 
-  const selectedKey = '/' + location.pathname.split('/').filter(Boolean).slice(0, 2).join('/');
+  const pathParts = location.pathname.split('/').filter(Boolean);
+  const selectedKey = pathParts.length >= 2 ? '/' + pathParts.slice(0, 2).join('/') : '/' + (pathParts[0] || 'workbench');
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -92,6 +94,7 @@ export function MainLayout() {
             </div>
           </Dropdown>
         </Header>
+        <NetworkStatus />
         <Content style={{ margin: 16, minHeight: 280 }}>
           <Outlet />
         </Content>
