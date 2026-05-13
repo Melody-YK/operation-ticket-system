@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+
+# environment
+.env
+
+# logs
+*.log
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# test coverage
+coverage/
