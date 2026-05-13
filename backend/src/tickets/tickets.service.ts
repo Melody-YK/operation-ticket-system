@@ -12,9 +12,10 @@ export class TicketsService {
     private stateMachine: TicketStateMachine,
   ) {}
 
-  /**
-   * 生成操作票票号：OP-YYYYMMDD-XXXXX
-   */
+  // ============================
+  // 工具方法
+  // ============================
+
   private async generateTicketNo(): Promise<string> {
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const prefix = `OP-${today}-`;
@@ -24,14 +25,56 @@ export class TicketsService {
       orderBy: { ticketId: 'desc' },
     });
 
-    if (!lastTicket) {
-      return `${prefix}00001`;
-    }
-
+    if (!lastTicket) return `${prefix}00001`;
     const lastSeq = parseInt(lastTicket.ticketId.slice(-5), 10);
-    const nextSeq = lastSeq + 1;
-    return `${prefix}${String(nextSeq).padStart(5, '0')}`;
+    return `${prefix}${String(lastSeq + 1).padStart(5, '0')}`;
   }
+
+  /**
+   * 写操作日志（统一入口）
+   */
+  private async writeLog(params: {
+    ticketId: string;
+    operatorId: string;
+    actionNode: string;
+    detail: string;
+    result?: string;
+    previousStatus?: string;
+    newStatus?: string;
+  }) {
+    const { ticketId, operatorId, actionNode, detail, result, previousStatus, newStatus } = params;
+    await this.prisma.operationLog.create({
+      data: {
+        ticketId,
+        operatorId,
+        actionNode,
+        actionDetail: JSON.stringify({
+          message: detail,
+          previousStatus,
+          newStatus,
+          timestamp: new Date().toISOString(),
+        }),
+        result: result || 'success',
+      },
+    });
+  }
+
+  /**
+   * 创建待办（统一入口）
+   */
+  private async createTodo(params: {
+    userId: string;
+    ticketId: string;
+    todoType: string;
+    title: string;
+    message: string;
+  }) {
+    await this.prisma.todo.create({ data: params });
+  }
+
+  // ============================
+  // CRUD
+  // ============================
 
   async create(dto: CreateTicketDto, userId: string) {
     const ticketNo = await this.generateTicketNo();
@@ -46,25 +89,25 @@ export class TicketsService {
         dispatcherId: dto.dispatcherId,
         basicInfo: (dto.basicInfo as any) || {},
         workTicketNo: dto.workTicketNo,
-        items: dto.items ? {
-          create: dto.items.map((item: OperationItemDto, index: number) => ({
-            itemId: `${ticketNo}-${String(index + 1).padStart(3, '0')}`,
-            stepContent: item.stepContent,
-            sequence: index + 1,
-          })),
-        } : undefined,
+        items: dto.items
+          ? {
+              create: dto.items.map((item: OperationItemDto, index: number) => ({
+                itemId: `${ticketNo}-${String(index + 1).padStart(3, '0')}`,
+                stepContent: item.stepContent,
+                sequence: index + 1,
+              })),
+            }
+          : undefined,
       },
       include: { items: true },
     });
 
-    await this.prisma.operationLog.create({
-      data: {
-        ticketId: ticketNo,
-        operatorId: userId,
-        actionNode: 'create',
-        actionDetail: '创建操作票',
-        result: 'success',
-      },
+    await this.writeLog({
+      ticketId: ticketNo,
+      operatorId: userId,
+      actionNode: 'create',
+      detail: '创建操作票（DRAFT）',
+      newStatus: 'DRAFT',
     });
 
     return ticket;
@@ -81,7 +124,6 @@ export class TicketsService {
   }) {
     const { page = 1, limit = 20, status, operatorId, keyword, startDate, endDate } = params;
     const skip = (page - 1) * limit;
-
     const where: any = {};
 
     if (status) where.status = status;
@@ -109,10 +151,7 @@ export class TicketsService {
       this.prisma.operationTicket.count({ where }),
     ]);
 
-    return {
-      data,
-      pagination: { page, limit, total },
-    };
+    return { data, pagination: { page, limit, total } };
   }
 
   async findOne(id: string) {
@@ -124,20 +163,25 @@ export class TicketsService {
         tools: true,
         logs: { orderBy: { actionTime: 'desc' } },
         workTicketInfo: true,
+        copies: true,
       },
     });
-    if (!ticket) {
-      throw new NotFoundException('操作票不存在');
-    }
+    if (!ticket) throw new NotFoundException('操作票不存在');
     return ticket;
   }
 
+  /**
+   * 更新操作票（仅 DRAFT / REJECTED 状态可编辑）
+   */
   async update(id: string, dto: UpdateTicketDto, userId: string) {
     const ticket = await this.findOne(id);
 
-    // 只有 DRAFT / REJECTED 状态可编辑
-    if (ticket.status !== 'DRAFT' && ticket.status !== 'REJECTED') {
-      throw new BadRequestException('当前状态不允许编辑操作票');
+    // 锁定防护：使用状态机判断是否可编辑
+    if (!this.stateMachine.isEditable(ticket.status)) {
+      throw new BadRequestException(
+        `操作票当前状态为「${this.stateMachine.getStatusLabel(ticket.status)}」，不允许编辑。` +
+        `仅「建立」或「建立（驳回）」状态可编辑。`
+      );
     }
 
     const updateData: any = {};
@@ -151,7 +195,6 @@ export class TicketsService {
       data: updateData,
     });
 
-    // 更新操作项（先删后插）
     if (dto.items) {
       await this.prisma.operationItem.deleteMany({ where: { ticketId: id } });
       await this.prisma.operationItem.createMany({
@@ -164,56 +207,146 @@ export class TicketsService {
       });
     }
 
+    await this.writeLog({
+      ticketId: id,
+      operatorId: userId,
+      actionNode: 'update',
+      detail: '更新操作票信息',
+      previousStatus: ticket.status,
+      newStatus: ticket.status,
+    });
+
     return this.findOne(id);
   }
 
-  /**
-   * 提交送审（DRAFT → PENDING_SUPERVISOR）
-   */
-  async submit(id: string, userId: string) {
-    const ticket = await this.findOne(id);
+  // ============================
+  // 状态迁移核心
+  // ============================
 
-    if (!this.stateMachine.validateTransition(ticket.status, 'submit')) {
-      throw new BadRequestException('当前状态不允许提交送审');
+  /**
+   * 执行通用的状态迁移 + 待办 + 日志
+   */
+  private async transition(params: {
+    id: string;
+    userId: string;
+    event: string;
+    comment?: string;
+    extraUpdate?: any;
+  }) {
+    const { id, userId, event, comment, extraUpdate } = params;
+    const ticket = await this.findOne(id);
+    const previousStatus = ticket.status;
+
+    // 1. 校验迁移合法性（非法时抛出友好异常）
+    this.stateMachine.validateTransitionOrThrow(previousStatus, event);
+
+    // 2. 获取目标状态
+    const targetStatus = this.stateMachine.getTargetState(previousStatus, event);
+    if (!targetStatus) {
+      throw new BadRequestException('状态迁移目标未定义');
     }
 
+    // 3. 执行迁移
+    const updateData: any = { status: targetStatus, ...extraUpdate };
     const updated = await this.prisma.operationTicket.update({
       where: { ticketId: id },
-      data: { status: 'PENDING_SUPERVISOR' },
+      data: updateData,
     });
 
-    // 创建待办通知监护人
-    await this.prisma.todo.create({
-      data: {
-        userId: ticket.supervisorId,
-        ticketId: id,
-        todoType: 'review',
-        title: `审核操作票：${ticket.taskName}`,
-        message: '操作票已提交送审，请审核',
-      },
-    });
+    // 4. 创建待办（根据目标状态）
+    await this.createTodoForTransition(ticket, previousStatus, event, targetStatus, comment);
 
-    await this.prisma.operationLog.create({
-      data: {
-        ticketId: id,
-        operatorId: userId,
-        actionNode: 'submit',
-        actionDetail: '提交送审',
-        result: 'success',
-      },
+    // 5. 记录日志（含前状态→事件→后状态的完整描述）
+    const transitionDesc = this.stateMachine.getTransitionDescription(previousStatus, event);
+    await this.writeLog({
+      ticketId: id,
+      operatorId: userId,
+      actionNode: event,
+      detail: `${transitionDesc}${comment ? ` | 意见：${comment}` : ''}`,
+      previousStatus,
+      newStatus: targetStatus,
     });
 
     return updated;
   }
 
   /**
-   * 审核操作票（三级审核通用）
+   * 根据状态迁移创建待办
+   */
+  private async createTodoForTransition(
+    ticket: any,
+    previousStatus: string,
+    event: string,
+    targetStatus: string,
+    comment?: string,
+  ) {
+    const target = targetStatus;
+    const name = ticket.taskName;
+
+    if (target === 'PENDING_SUPERVISOR') {
+      await this.createTodo({
+        userId: ticket.supervisorId,
+        ticketId: ticket.ticketId,
+        todoType: 'review',
+        title: `审核操作票：${name}`,
+        message: '操作票已提交送审，请监护人审核',
+      });
+    } else if (target === 'PENDING_APPROVER' && ticket.approverId) {
+      await this.createTodo({
+        userId: ticket.approverId,
+        ticketId: ticket.ticketId,
+        todoType: 'review',
+        title: `审核操作票：${name}`,
+        message: '监护人已审核通过，请批准人审核',
+      });
+    } else if (target === 'PENDING_DISPATCHER' && ticket.dispatcherId) {
+      await this.createTodo({
+        userId: ticket.dispatcherId,
+        ticketId: ticket.ticketId,
+        todoType: 'review',
+        title: `审核操作票：${name}`,
+        message: '批准人已审核通过，请发令人审核',
+      });
+    } else if (target === 'PENDING_EXECUTE') {
+      await this.createTodo({
+        userId: ticket.operatorId,
+        ticketId: ticket.ticketId,
+        todoType: 'execute',
+        title: `执行操作票：${name}`,
+        message: '指令已下达，请执行操作',
+      });
+    } else if (target === 'REJECTED') {
+      await this.createTodo({
+        userId: ticket.operatorId,
+        ticketId: ticket.ticketId,
+        todoType: 'review',
+        title: `操作票被驳回：${name}`,
+        message: comment
+          ? `驳回意见：${comment}`
+          : `操作票已被${this.stateMachine.getStatusLabel(previousStatus)}驳回，请修改后重新提交`,
+      });
+    }
+  }
+
+  // ============================
+  // 公开 API 方法
+  // ============================
+
+  /**
+   * 提交送审：DRAFT → PENDING_SUPERVISOR
+   */
+  async submit(id: string, userId: string) {
+    return this.transition({ id, userId, event: 'submit' });
+  }
+
+  /**
+   * 审核操作票：三级审核通用
+   * action = 'approve' | 'reject'
    */
   async review(id: string, userId: string, action: string, comment?: string) {
     const ticket = await this.findOne(id);
     const currentStatus = ticket.status;
 
-    // 根据当前状态+审核动作确定事件
     const eventMap: Record<string, string> = {
       'PENDING_SUPERVISOR-approve': 'approve',
       'PENDING_SUPERVISOR-reject': 'reject',
@@ -224,80 +357,77 @@ export class TicketsService {
     };
 
     const event = eventMap[`${currentStatus}-${action}`];
-    if (!event || !this.stateMachine.validateTransition(currentStatus, event)) {
-      throw new BadRequestException('当前状态不允许此审核操作');
+    if (!event) {
+      throw new BadRequestException(
+        `当前状态「${this.stateMachine.getStatusLabel(currentStatus)}」不支持审核操作「${action}」`
+      );
     }
 
-    const targetStatus = this.stateMachine.getTargetState(currentStatus, event);
-    if (!targetStatus) {
-      throw new BadRequestException('状态迁移目标未定义');
-    }
-
-    // 发令人审核通过需要写入下令时间
-    const updateData: any = { status: targetStatus };
+    // 发令人审核通过时写入下令时间
+    const extraUpdate: any = {};
     if (action === 'approve' && currentStatus === 'PENDING_DISPATCHER') {
-      updateData.dispatchTime = new Date();
+      extraUpdate.dispatchTime = new Date();
     }
 
-    const updated = await this.prisma.operationTicket.update({
-      where: { ticketId: id },
-      data: updateData,
+    return this.transition({
+      id,
+      userId,
+      event,
+      comment,
+      extraUpdate: Object.keys(extraUpdate).length > 0 ? extraUpdate : undefined,
     });
+  }
 
-    // 根据目标状态创建待办
-    if (targetStatus === 'PENDING_APPROVER' && ticket.approverId) {
-      await this.prisma.todo.create({
-        data: {
-          userId: ticket.approverId,
-          ticketId: id,
-          todoType: 'review',
-          title: `审核操作票：${ticket.taskName}`,
-          message: '监护人已审核通过，请批准人审核',
-        },
-      });
-    } else if (targetStatus === 'PENDING_DISPATCHER' && ticket.dispatcherId) {
-      await this.prisma.todo.create({
-        data: {
-          userId: ticket.dispatcherId,
-          ticketId: id,
-          todoType: 'review',
-          title: `审核操作票：${ticket.taskName}`,
-          message: '批准人已审核通过，请发令人审核',
-        },
-      });
-    } else if (targetStatus === 'PENDING_EXECUTE') {
-      await this.prisma.todo.create({
-        data: {
-          userId: ticket.operatorId,
-          ticketId: id,
-          todoType: 'execute',
-          title: `执行操作票：${ticket.taskName}`,
-          message: '指令已下达，请执行操作',
-        },
-      });
-    } else if (targetStatus === 'REJECTED') {
-      await this.prisma.todo.create({
-        data: {
-          userId: ticket.operatorId,
-          ticketId: id,
-          todoType: 'review',
-          title: `操作票被驳回：${ticket.taskName}`,
-          message: comment ? `驳回意见：${comment}` : '操作票已被驳回，请修改后重新提交',
-        },
-      });
+  /**
+   * 下达操作指令（独立端点）：PENDING_DISPATCHER → PENDING_EXECUTE
+   */
+  async dispatch(id: string, userId: string) {
+    const ticket = await this.findOne(id);
+    const currentStatus = ticket.status;
+
+    if (currentStatus !== 'PENDING_DISPATCHER') {
+      throw new BadRequestException(
+        `当前状态为「${this.stateMachine.getStatusLabel(currentStatus)}」，` +
+        `仅「待审核（发令人）」状态可下达指令。请先完成审核。`
+      );
     }
 
-    // 记录日志
-    await this.prisma.operationLog.create({
-      data: {
-        ticketId: id,
-        operatorId: userId,
-        actionNode: 'review',
-        actionDetail: `审核操作：${action}${comment ? `，意见：${comment}` : ''}`,
-        result: action,
-      },
+    return this.transition({
+      id,
+      userId,
+      event: 'approve_and_dispatch',
+      extraUpdate: { dispatchTime: new Date() },
     });
+  }
 
-    return updated;
+  /**
+   * 重新提交（驳回后）：REJECTED → PENDING_SUPERVISOR
+   */
+  async resubmit(id: string, userId: string) {
+    const ticket = await this.findOne(id);
+
+    if (ticket.operatorId !== userId) {
+      throw new BadRequestException('只有操作票的操作人可以重新提交');
+    }
+
+    return this.transition({ id, userId, event: 'resubmit' });
+  }
+
+  /**
+   * 获取操作票状态信息（用于前端展示）
+   */
+  async getStatusInfo(id: string) {
+    const ticket = await this.findOne(id);
+    const allowedEvents = this.stateMachine.getAllowedEvents(ticket.status);
+
+    return {
+      ticketId: ticket.ticketId,
+      currentStatus: ticket.status,
+      currentStatusLabel: this.stateMachine.getStatusLabel(ticket.status),
+      isEditable: this.stateMachine.isEditable(ticket.status),
+      isLocked: this.stateMachine.isLocked(ticket.status),
+      dispatchTime: ticket.dispatchTime,
+      allowedActions: allowedEvents,
+    };
   }
 }
