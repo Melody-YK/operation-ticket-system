@@ -126,7 +126,14 @@ export class TicketsService {
     const skip = (page - 1) * limit;
     const where: any = {};
 
-    if (status) where.status = status;
+    if (status) {
+      const statusList = status.split(',').filter(Boolean);
+      if (statusList.length === 1) {
+        where.status = statusList[0];
+      } else {
+        where.status = { in: statusList };
+      }
+    }
     if (operatorId) where.operatorId = operatorId;
     if (keyword) {
       where.OR = [
