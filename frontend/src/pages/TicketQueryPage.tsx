@@ -42,14 +42,16 @@ export function TicketQueryPage() {
   const fetchData = async (page = 1, showLoading = true) => {
     if (showLoading) setLoading(true);
     setError('');
+
+    const params: any = { page, limit: pagination.limit };
+    if (keyword) params.keyword = keyword;
+    if (statusFilter) params.status = statusFilter;
+    if (dateRange) {
+      params.start_date = dateRange[0];
+      params.end_date = dateRange[1];
+    }
+
     try {
-      const params: any = { page, limit: pagination.limit };
-      if (keyword) params.keyword = keyword;
-      if (statusFilter) params.status = statusFilter;
-      if (dateRange) {
-        params.start_date = dateRange[0];
-        params.end_date = dateRange[1];
-      }
       const res = await api.getTickets(params);
       console.debug('[TicketQuery] 查询成功:', { params, total: res.pagination.total });
       setTickets(res.data);

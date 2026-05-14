@@ -32,7 +32,10 @@ export function MainLayout() {
     { key: '/tickets/query', icon: <SearchOutlined />, label: '查询操作票', roles: ['OPERATOR', 'SUPERVISOR', 'APPROVER', 'DISPATCHER'] },
   ]
     .filter(item => item.roles.includes(role))
-    .map(({ roles: _r, ...rest }) => rest);  // 去掉 roles 再传给 Menu，避免 React 警告
+    .map(({ roles: _roles, ...rest }) => {
+      void _roles;
+      return rest;
+    });  // 去掉 roles 再传给 Menu，避免 React 警告
 
   const pathParts = location.pathname.split('/').filter(Boolean);
   const selectedKey = pathParts.length >= 2 ? '/' + pathParts.slice(0, 2).join('/') : '/' + (pathParts[0] || 'workbench');
