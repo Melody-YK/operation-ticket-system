@@ -27,10 +27,12 @@ export function MainLayout() {
   const role = user?.role || '';
 
   const menuItems = [
-    { key: '/workbench', icon: <DashboardOutlined />, label: '工作台', showFor: ['OPERATOR', 'SUPERVISOR', 'APPROVER', 'DISPATCHER'] },
-    { key: '/tickets/create', icon: <FileAddOutlined />, label: '创建操作票', showFor: ['OPERATOR'] },
-    { key: '/tickets/query', icon: <SearchOutlined />, label: '查询操作票', showFor: ['OPERATOR', 'SUPERVISOR', 'APPROVER', 'DISPATCHER'] },
-  ].filter(item => item.showFor.includes(role));
+    { key: '/workbench', icon: <DashboardOutlined />, label: '工作台', roles: ['OPERATOR', 'SUPERVISOR', 'APPROVER', 'DISPATCHER'] },
+    { key: '/tickets/create', icon: <FileAddOutlined />, label: '创建操作票', roles: ['OPERATOR'] },
+    { key: '/tickets/query', icon: <SearchOutlined />, label: '查询操作票', roles: ['OPERATOR', 'SUPERVISOR', 'APPROVER', 'DISPATCHER'] },
+  ]
+    .filter(item => item.roles.includes(role))
+    .map(({ roles: _r, ...rest }) => rest);  // 去掉 roles 再传给 Menu，避免 React 警告
 
   const pathParts = location.pathname.split('/').filter(Boolean);
   const selectedKey = pathParts.length >= 2 ? '/' + pathParts.slice(0, 2).join('/') : '/' + (pathParts[0] || 'workbench');

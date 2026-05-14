@@ -7,6 +7,7 @@ import {
   ClockCircleOutlined,
   CloseCircleOutlined,
   PlusOutlined,
+  SendOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { TicketStatusTag } from '../components/TicketStatusTag';
@@ -14,6 +15,36 @@ import { ROLE_LABELS } from '../utils/constants';
 import { api } from '../api/client';
 
 const { Title, Text } = Typography;
+
+interface StatCard {
+  key: string;
+  title: string;
+  statusFilter: string;
+  icon: React.ReactNode;
+  color: string;
+}
+
+const ROLE_STATS: Record<string, StatCard[]> = {
+  OPERATOR: [
+    { key: 'pending', title: '待审核', statusFilter: 'PENDING_SUPERVISOR,PENDING_APPROVER,PENDING_DISPATCHER', icon: <ClockCircleOutlined />, color: '#faad14' },
+    { key: 'executing', title: '执行中', statusFilter: 'EXECUTING', icon: <FileTextOutlined />, color: '#1677ff' },
+    { key: 'completed', title: '已完成', statusFilter: 'COMPLETED', icon: <CheckCircleOutlined />, color: '#52c41a' },
+    { key: 'rejected', title: '已退回', statusFilter: 'REJECTED', icon: <CloseCircleOutlined />, color: '#ff4d4f' },
+  ],
+  SUPERVISOR: [
+    { key: 'pending', title: '待审核', statusFilter: 'PENDING_SUPERVISOR', icon: <ClockCircleOutlined />, color: '#faad14' },
+    { key: 'executing', title: '执行中', statusFilter: 'EXECUTING', icon: <FileTextOutlined />, color: '#1677ff' },
+    { key: 'completed', title: '已完成', statusFilter: 'COMPLETED', icon: <CheckCircleOutlined />, color: '#52c41a' },
+  ],
+  APPROVER: [
+    { key: 'pending', title: '待审核', statusFilter: 'PENDING_APPROVER', icon: <ClockCircleOutlined />, color: '#faad14' },
+  ],
+  DISPATCHER: [
+    { key: 'pending', title: '待发令', statusFilter: 'PENDING_DISPATCHER', icon: <SendOutlined />, color: '#faad14' },
+    { key: 'executing', title: '执行中', statusFilter: 'EXECUTING', icon: <FileTextOutlined />, color: '#1677ff' },
+    { key: 'completed', title: '待校验', statusFilter: 'COMPLETED', icon: <CheckCircleOutlined />, color: '#52c41a' },
+  ],
+};
 
 export function WorkbenchPage() {
   const { user } = useAuth();
@@ -40,20 +71,19 @@ export function WorkbenchPage() {
 
   useEffect(() => {
     let cancelled = false;
-    const statusFilter = getRoleStatusFilter(role);
-    api.getTickets({ page: 1, limit: 50, ...(statusFilter ? { status: statusFilter } : {}) })
+    api.getTickets({ page: 1, limit: 50 })
       .then(res => { if (!cancelled) setTickets(res.data); })
       .catch(e => { if (!cancelled) setError(e.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [role]);
+  }, []);
 
-  const pendingCount = tickets.filter(t =>
-    ['PENDING_SUPERVISOR', 'PENDING_APPROVER', 'PENDING_DISPATCHER'].includes(t.status)
-  ).length;
-  const executingCount = tickets.filter(t => t.status === 'EXECUTING').length;
-  const completedCount = tickets.filter(t => t.status === 'COMPLETED').length;
-  const rejectedCount = tickets.filter(t => t.status === 'REJECTED').length;
+  /** 根据角色统计卡片定义，计算各卡片数值 */
+  const statCards = (ROLE_STATS[role] || []).map(card => {
+    const statuses = card.statusFilter.split(',');
+    const value = tickets.filter(t => statuses.includes(t.status)).length;
+    return { ...card, value };
+  });
 
   const greeting = (() => {
     const h = new Date().getHours();
@@ -74,28 +104,17 @@ export function WorkbenchPage() {
         <Text type="secondary">{ROLE_LABELS[role] || role} · 工作台</Text>
       </div>
 
-      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-        <Col xs={12} sm={6}>
-          <Card hoverable onClick={() => navigate('/tickets/query?status=PENDING_SUPERVISOR')}>
-            <Statistic title="待审核" value={pendingCount} prefix={<ClockCircleOutlined />} valueStyle={{ color: '#faad14' }} />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6}>
-          <Card hoverable onClick={() => navigate('/tickets/query?status=EXECUTING')}>
-            <Statistic title="执行中" value={executingCount} prefix={<FileTextOutlined />} valueStyle={{ color: '#1677ff' }} />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6}>
-          <Card hoverable onClick={() => navigate('/tickets/query?status=COMPLETED')}>
-            <Statistic title="已完成" value={completedCount} prefix={<CheckCircleOutlined />} valueStyle={{ color: '#52c41a' }} />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6}>
-          <Card hoverable onClick={() => navigate('/tickets/query?status=REJECTED')}>
-            <Statistic title="被驳回" value={rejectedCount} prefix={<CloseCircleOutlined />} valueStyle={{ color: '#ff4d4f' }} />
-          </Card>
-        </Col>
-      </Row>
+      {statCards.length > 0 && (
+        <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+          {statCards.map(card => (
+            <Col xs={12} sm={Math.floor(24 / statCards.length)} key={card.key}>
+              <Card hoverable onClick={() => navigate(`/tickets/query?status=${card.statusFilter}`)}>
+                <Statistic title={card.title} value={card.value} prefix={card.icon} styles={{ content: { color: card.color } }} />
+              </Card>
+            </Col>
+          ))}
+        </Row>
+      )}
 
       {role === 'OPERATOR' && (
         <Button type="primary" icon={<PlusOutlined />} size="large" style={{ marginBottom: 16 }} onClick={() => navigate('/tickets/create')}>
@@ -123,16 +142,6 @@ export function WorkbenchPage() {
       </Card>
     </div>
   );
-}
-
-function getRoleStatusFilter(role: string): string | undefined {
-  switch (role) {
-    case 'OPERATOR': return undefined;
-    case 'SUPERVISOR': return 'PENDING_SUPERVISOR';
-    case 'APPROVER': return 'PENDING_APPROVER';
-    case 'DISPATCHER': return 'PENDING_DISPATCHER';
-    default: return undefined;
-  }
 }
 
 export default WorkbenchPage;

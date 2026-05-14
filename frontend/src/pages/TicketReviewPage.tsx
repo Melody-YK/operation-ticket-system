@@ -18,16 +18,16 @@ const { TextArea } = Input;
 const ROLE_ACTIONS: Record<string, { action: string; label: string; icon: any; color: string; danger?: boolean }[]> = {
   SUPERVISOR: [
     { action: 'approve', label: '审核通过', icon: <CheckCircleOutlined />, color: 'green' },
-    { action: 'reject', label: '驳回', icon: <CloseCircleOutlined />, color: 'red', danger: true },
+    { action: 'reject', label: '退回', icon: <CloseCircleOutlined />, color: 'red', danger: true },
   ],
   APPROVER: [
     { action: 'approve', label: '审核通过', icon: <CheckCircleOutlined />, color: 'green' },
-    { action: 'reject', label: '驳回', icon: <CloseCircleOutlined />, color: 'red', danger: true },
+    { action: 'reject', label: '退回', icon: <CloseCircleOutlined />, color: 'red', danger: true },
   ],
   DISPATCHER: [
     { action: 'approve', label: '审核通过', icon: <CheckCircleOutlined />, color: 'green' },
     { action: 'approve_and_dispatch', label: '审核并下达指令', icon: <SendOutlined />, color: 'blue' },
-    { action: 'reject', label: '驳回', icon: <CloseCircleOutlined />, color: 'red', danger: true },
+    { action: 'reject', label: '退回', icon: <CloseCircleOutlined />, color: 'red', danger: true },
   ],
 };
 

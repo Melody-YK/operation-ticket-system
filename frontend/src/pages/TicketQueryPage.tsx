@@ -32,8 +32,11 @@ export function TicketQueryPage() {
   const [error, setError] = useState('');
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0 });
 
-  const [keyword, setKeyword] = useState(searchParams.get('keyword') || '');
-  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
+  const initKeyword = searchParams.get('keyword') || '';
+  const initStatus = searchParams.get('status') || '';
+
+  const [keyword, setKeyword] = useState(initKeyword);
+  const [statusFilter, setStatusFilter] = useState(initStatus);
   const [dateRange, setDateRange] = useState<[string, string] | null>(null);
 
   const fetchData = async (page = 1, showLoading = true) => {
@@ -48,20 +51,31 @@ export function TicketQueryPage() {
         params.end_date = dateRange[1];
       }
       const res = await api.getTickets(params);
+      console.debug('[TicketQuery] 查询成功:', { params, total: res.pagination.total });
       setTickets(res.data);
       setPagination(prev => ({ ...prev, page, total: res.pagination.total }));
     } catch (e: any) {
+      console.error('[TicketQuery] 查询失败:', params, e.message);
       setError(e.message);
     } finally {
       setLoading(false);
     }
   };
 
+  // 首次加载：如果 URL 带了 ?status= 参数，直接用该参数查询；否则查全部
   useEffect(() => {
     let cancelled = false;
-    api.getTickets({ page: 1, limit: 20 })
+    const params: any = { page: 1, limit: 20 };
+    if (initStatus) params.status = initStatus;
+    console.debug('[TicketQuery] 首次加载参数:', params);
+    api.getTickets(params)
       .then(res => { if (!cancelled) { setTickets(res.data); setPagination(prev => ({ ...prev, total: res.pagination.total })); } })
-      .catch(e => { if (!cancelled) setError(e.message); })
+      .catch(e => {
+        if (!cancelled) {
+          console.error('[TicketQuery] 请求失败:', params, e.message);
+          setError(e.message);
+        }
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
@@ -133,7 +147,7 @@ export function TicketQueryPage() {
 
       <Card>
         {error ? (
-          <Alert message={error} type="error" />
+          <Alert type="error" title={error} />
         ) : (
           <Table
             dataSource={tickets}
