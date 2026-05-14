@@ -101,7 +101,6 @@ SUBMIT_RES=$(curl -s -X POST "$API/tickets/$TICKET_ID/submit" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN_ZS")
 check_response "  提交送审" "PENDING_SUPERVISOR" "$SUBMIT_RES"
-sleep 2
 
 # ---- Step 7: 监护人审核通过 ----
 SUPERVISOR_RES=$(curl -s -X POST "$API/tickets/$TICKET_ID/review" \
@@ -109,7 +108,6 @@ SUPERVISOR_RES=$(curl -s -X POST "$API/tickets/$TICKET_ID/review" \
   -H "Authorization: Bearer $TOKEN_ZL" \
   -d '{"action":"approve","comment":"监护人审核通过"}')
 check_response "  监护人审核" "PENDING_APPROVER" "$SUPERVISOR_RES"
-sleep 2
 
 # ---- Step 8: 批准人审核通过 ----
 APPROVER_RES=$(curl -s -X POST "$API/tickets/$TICKET_ID/review" \
@@ -117,7 +115,6 @@ APPROVER_RES=$(curl -s -X POST "$API/tickets/$TICKET_ID/review" \
   -H "Authorization: Bearer $TOKEN_SB" \
   -d '{"action":"approve","comment":"批准人审核通过"}')
 check_response "  批准人审核" "PENDING_DISPATCHER" "$APPROVER_RES"
-sleep 2
 
 # ---- Step 9: 发令人审核通过并下令 ----
 DISPATCHER_RES=$(curl -s -X POST "$API/tickets/$TICKET_ID/review" \
@@ -127,14 +124,12 @@ DISPATCHER_RES=$(curl -s -X POST "$API/tickets/$TICKET_ID/review" \
 
 # 发令人审核通过 + 下达指令（服务端自动映射为 approve_and_dispatch 并写入 dispatchTime）
 check_response "  发令人审核+下令" "PENDING_EXECUTE" "$DISPATCHER_RES"
-sleep 2
 
 # ---- Step 10: 开始执行 ----
 START_EXEC_RES=$(curl -s -X POST "$API/tickets/$TICKET_ID/start-execute" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN_ZS")
 check_response "  开始执行" "EXECUTING" "$START_EXEC_RES"
-sleep 2
 
 # ---- Step 11: 逐项执行 ----
 # 获取操作项列表
@@ -165,7 +160,6 @@ if [ -n "$ITEM1_ID" ]; then
     -H "Authorization: Bearer $TOKEN_ZS" \
     -d '{"action":"execute"}')
   check_response "  执行第1项" "COMPLETED" "$EXEC_ITEM1"
-  sleep 2
 fi
 
 if [ -n "$ITEM2_ID" ]; then
@@ -174,7 +168,6 @@ if [ -n "$ITEM2_ID" ]; then
     -H "Authorization: Bearer $TOKEN_ZS" \
     -d '{"action":"skip"}')
   check_response "  跳过第2项" "SKIPPED" "$EXEC_ITEM2"
-  sleep 2
 fi
 
 if [ -n "$ITEM3_ID" ]; then
@@ -183,7 +176,6 @@ if [ -n "$ITEM3_ID" ]; then
     -H "Authorization: Bearer $TOKEN_ZS" \
     -d '{"action":"execute"}')
   check_response "  执行第3项" "COMPLETED" "$EXEC_ITEM3"
-  sleep 2
 fi
 
 # ---- Step 12: 完成执行 ----
@@ -191,7 +183,6 @@ COMPLETE_RES=$(curl -s -X POST "$API/tickets/$TICKET_ID/complete" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN_ZS")
 check_response "  完成执行" "COMPLETED" "$COMPLETE_RES"
-sleep 2
 
 # ---- Step 13: 数据校验通过 ----
 VERIFY_RES=$(curl -s -X POST "$API/tickets/$TICKET_ID/verify" \
