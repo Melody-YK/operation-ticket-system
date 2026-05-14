@@ -228,7 +228,96 @@ docker compose down       # 停止数据库
 docker compose logs -f    # 查看日志
 ```
 
-## 10. 项目文档
+## 10. 如何关闭项目
+
+本项目本地开发时通常会启动 3 个东西：
+
+1. 前端 Vite 服务：`http://localhost:5173`
+2. 后端 NestJS 服务：`http://localhost:3000/api/v1`
+3. PostgreSQL 数据库容器：`localhost:5432`
+
+### 10.1 正常关闭方式
+
+如果前端和后端是在终端里用 `pnpm dev` / `pnpm start:dev` 启动的，直接回到对应终端按：
+
+```bash
+Ctrl + C
+```
+
+分别停止：
+
+- 前端终端：停止 `pnpm dev`
+- 后端终端：停止 `pnpm start:dev`
+
+然后在项目根目录关闭数据库：
+
+```bash
+cd "/Users/melody/Desktop/tbd和superpowers/interview-requirements-power-test"
+docker compose down
+```
+
+### 10.2 检查是否已经关闭
+
+检查数据库容器：
+
+```bash
+docker compose ps
+```
+
+如果没有正在运行的服务，说明数据库已关闭。
+
+检查端口是否还被占用：
+
+```bash
+lsof -i :5173
+lsof -i :3000
+lsof -i :5432
+```
+
+如果没有输出，说明前端、后端、数据库端口都已经释放。
+
+### 10.3 强制关闭占用端口的进程
+
+如果忘了在哪个终端启动，或者 `Ctrl + C` 后端口仍被占用，可以先查 PID：
+
+```bash
+lsof -i :5173
+lsof -i :3000
+```
+
+然后按查到的 PID 结束进程：
+
+```bash
+kill <PID>
+```
+
+如果普通 `kill` 无效，再使用：
+
+```bash
+kill -9 <PID>
+```
+
+> 建议优先使用 `Ctrl + C` 和 `docker compose down`，`kill -9` 只作为最后手段。
+
+### 10.4 是否会删除数据？
+
+执行：
+
+```bash
+docker compose down
+```
+
+会停止并删除容器网络，但通常不会删除数据库卷里的数据。
+
+如果你想连数据库数据也一起清空，才使用：
+
+```bash
+docker compose down -v
+```
+
+> 注意：`docker compose down -v` 会删除数据库卷，本地演示数据会丢失。除非你明确想重置数据库，否则不要用。
+
+## 11. 项目文档
 
 核心文档：
 
@@ -240,7 +329,7 @@ PRD.md                                      # 原始需求文档
 IMPLEMENTATION_PLAN.md                     # Superpowers 生成的实现计划
 ```
 
-## 11. 项目状态
+## 12. 项目状态
 
 项目已完成全部 5 个 Sprint 的开发交付。覆盖功能：
 
