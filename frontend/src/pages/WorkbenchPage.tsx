@@ -27,6 +27,7 @@ interface StatCard {
 const ROLE_STATS: Record<string, StatCard[]> = {
   OPERATOR: [
     { key: 'pending', title: '待审核', statusFilter: 'PENDING_SUPERVISOR,PENDING_APPROVER,PENDING_DISPATCHER', icon: <ClockCircleOutlined />, color: '#faad14' },
+    { key: 'pending_execute', title: '待执行', statusFilter: 'PENDING_EXECUTE', icon: <SendOutlined />, color: '#722ed1' },
     { key: 'executing', title: '执行中', statusFilter: 'EXECUTING', icon: <FileTextOutlined />, color: '#1677ff' },
     { key: 'completed', title: '已完成', statusFilter: 'COMPLETED', icon: <CheckCircleOutlined />, color: '#52c41a' },
     { key: 'rejected', title: '已退回', statusFilter: 'REJECTED', icon: <CloseCircleOutlined />, color: '#ff4d4f' },
