@@ -123,31 +123,32 @@ export function TicketReviewPage() {
     });
   })();
 
-  const confirmAction = async () => {
+  const confirmAction = async (action?: string) => {
     if (!id) return;
+    const execAction = action ?? currentAction;
     setSubmitting(true);
     try {
-      if (currentAction === 'approve_and_dispatch') {
+      if (execAction === 'approve_and_dispatch') {
         await api.reviewTicket(id, 'approve', comment);
         message.success('审核通过并下达指令成功！');
-      } else if (currentAction === 'submit') {
+      } else if (execAction === 'submit') {
         await api.submitTicket(id);
         message.success('已提交送审！');
-      } else if (currentAction === 'resubmit') {
+      } else if (execAction === 'resubmit') {
         await api.resubmitTicket(id);
         message.success('已重新提交！');
-      } else if (currentAction === 'start_execute') {
+      } else if (execAction === 'start_execute') {
         await api.startExecute(id);
         message.success('开始执行！');
-      } else if (currentAction === 'go_execute') {
+      } else if (execAction === 'go_execute') {
         navigate(`/tickets/${id}/execute`);
         return;
-      } else if (currentAction === 'go_verify') {
+      } else if (execAction === 'go_verify') {
         navigate(`/tickets/${id}/verify`);
         return;
       } else {
-        await api.reviewTicket(id, currentAction, comment);
-        message.success(currentAction === 'approve' ? '审核通过！' : '已驳回');
+        await api.reviewTicket(id, execAction, comment);
+        message.success(execAction === 'approve' ? '审核通过！' : '已驳回');
       }
       setModalVisible(false);
       const [ticketData, statusData] = await Promise.all([
@@ -165,10 +166,10 @@ export function TicketReviewPage() {
 
   /** 点击操作按钮：需要确认的弹窗，无需确认的直接执行 */
   const handleAction = (action: string) => {
-    // 无需弹窗确认的操作
+    // 无需弹窗确认的操作（直接执行，传入 action 避免 setCurrentAction 异步问题）
     if (action === 'start_execute' || action === 'go_execute' || action === 'go_verify') {
       setCurrentAction(action);
-      confirmAction();
+      confirmAction(action);
       return;
     }
     // 编辑模式：初始化表单
@@ -375,7 +376,7 @@ export function TicketReviewPage() {
       <Modal
         title={currentAction === 'reject' ? '驳回操作票' : '审核确认'}
         open={modalVisible}
-        onOk={confirmAction}
+        onOk={() => confirmAction(currentAction)}
         onCancel={() => setModalVisible(false)}
         confirmLoading={submitting}
         okText={currentAction === 'reject' ? '确认驳回' : '确认通过'}
