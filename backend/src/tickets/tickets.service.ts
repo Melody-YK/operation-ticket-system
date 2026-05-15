@@ -207,8 +207,8 @@ export class TicketsService {
     }
 
     if (dto.basicInfo !== undefined) {
-      const oldBasic = ticket.basicInfo || {};
-      const newBasic = dto.basicInfo as any;
+      const oldBasic: any = ticket.basicInfo || {};
+      const newBasic: any = dto.basicInfo;
       if (newBasic.station !== undefined && normalize(newBasic.station) !== normalize(oldBasic.station)) {
         changes.push(`变电站: "${oldBasic.station || '-'}" → "${newBasic.station}"`);
       }
@@ -333,13 +333,15 @@ export class TicketsService {
     const target = targetStatus;
     const name = ticket.taskName;
 
+    const isResubmit = event === 'resubmit';
+
     if (target === 'PENDING_SUPERVISOR') {
       await this.createTodo({
         userId: ticket.supervisorId,
         ticketId: ticket.ticketId,
         todoType: 'review',
         title: `审核操作票：${name}`,
-        message: '操作票已提交送审，请监护人审核',
+        message: isResubmit ? '操作票已重新提交，请监护人审核' : '操作票已提交送审，请监护人审核',
       });
     } else if (target === 'PENDING_APPROVER' && ticket.approverId) {
       await this.createTodo({
@@ -347,7 +349,7 @@ export class TicketsService {
         ticketId: ticket.ticketId,
         todoType: 'review',
         title: `审核操作票：${name}`,
-        message: '监护人已审核通过，请批准人审核',
+        message: isResubmit ? '操作票已重新提交，请批准人审核' : '操作票待审核，请批准人审核',
       });
     } else if (target === 'PENDING_DISPATCHER' && ticket.dispatcherId) {
       await this.createTodo({
@@ -355,7 +357,7 @@ export class TicketsService {
         ticketId: ticket.ticketId,
         todoType: 'review',
         title: `审核操作票：${name}`,
-        message: '批准人已审核通过，请发令人审核',
+        message: isResubmit ? '操作票已重新提交，请发令人审核' : '操作票待审核，请发令人审核',
       });
     } else if (target === 'PENDING_EXECUTE') {
       await this.createTodo({
@@ -414,9 +416,13 @@ export class TicketsService {
     }
 
     // 发令人审核通过时写入下令时间
+    // 审核驳回时记录来源状态（用于重新提交跳回对应审核节点）
     const extraUpdate: any = {};
     if (action === 'approve' && currentStatus === 'PENDING_DISPATCHER') {
       extraUpdate.dispatchTime = new Date();
+    }
+    if (action === 'reject') {
+      extraUpdate.rejectedFromStatus = currentStatus;
     }
 
     return this.transition({
@@ -451,7 +457,10 @@ export class TicketsService {
   }
 
   /**
-   * 重新提交（驳回后）：REJECTED → PENDING_SUPERVISOR
+   * 重新提交（驳回后）：根据驳回来源跳回对应审核节点
+   *   - 监护人驳回 → PENDING_SUPERVISOR
+   *   - 批准人驳回 → PENDING_APPROVER
+   *   - 发令人驳回 → PENDING_DISPATCHER
    */
   async resubmit(id: string, userId: string) {
     const ticket = await this.findOne(id);
@@ -459,8 +468,44 @@ export class TicketsService {
     if (ticket.operatorId !== userId) {
       throw new BadRequestException('只有操作票的操作人可以重新提交');
     }
+    if (ticket.status !== 'REJECTED') {
+      throw new BadRequestException('仅驳回状态的操作票可以重新提交');
+    }
 
-    return this.transition({ id, userId, event: 'resubmit' });
+    // 根据驳回来源确定目标审核节点
+    const rejectedFrom = ticket.rejectedFromStatus || 'PENDING_SUPERVISOR';
+    const targetMap: Record<string, string> = {
+      'PENDING_SUPERVISOR': 'PENDING_SUPERVISOR',
+      'PENDING_APPROVER': 'PENDING_APPROVER',
+      'PENDING_DISPATCHER': 'PENDING_DISPATCHER',
+    };
+    const targetStatus = targetMap[rejectedFrom] || 'PENDING_SUPERVISOR';
+
+    // 更新状态 & 清除驳回标记
+    await this.prisma.operationTicket.update({
+      where: { ticketId: id },
+      data: {
+        status: targetStatus as any,
+        rejectedFromStatus: null,
+      },
+    });
+
+    // 创建待办
+    await this.createTodoForTransition(ticket, 'REJECTED', 'resubmit', targetStatus);
+
+    // 记录日志
+    const fromLabel = this.stateMachine.getStatusLabel('REJECTED');
+    const toLabel = this.stateMachine.getStatusLabel(targetStatus);
+    await this.writeLog({
+      ticketId: id,
+      operatorId: userId,
+      actionNode: 'resubmit',
+      detail: `[${fromLabel}] → 重新提交 → [${toLabel}]（驳回来源：${this.stateMachine.getStatusLabel(rejectedFrom)}）`,
+      previousStatus: 'REJECTED',
+      newStatus: targetStatus,
+    });
+
+    return this.findOne(id);
   }
 
   /**

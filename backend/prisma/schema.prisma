@@ -88,6 +88,7 @@ model OperationTicket {
   // 时间戳
   dispatchTime DateTime? @map("dispatch_time")   // 下令时间（发令人下达指令时写入）
   archivedAt   DateTime? @map("archived_at")     // 归档时间
+  rejectedFromStatus String? @map("rejected_from_status") // 驳回来源状态，用于重新提交时跳回对应节点
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
