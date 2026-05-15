@@ -46,9 +46,8 @@ export function TicketCreatePage() {
           workType: values.workType || '',
         },
         workTicketNo: values.workTicketNo || null,
-        items: (values.items || []).map((item: any, index: number) => ({
+        items: (values.items || []).map((item: any) => ({
           stepContent: item.stepContent,
-          sequence: index + 1,
         })),
       };
 
@@ -73,7 +72,7 @@ export function TicketCreatePage() {
         approverId: values.approverId || '',
         dispatcherId: values.dispatcherId || '',
         basicInfo: { station: values.station || '', workType: values.workType || '' },
-        items: (values.items || []).map((item: any, index: number) => ({ stepContent: item.stepContent, sequence: index + 1 })),
+        items: (values.items || []).map((item: any) => ({ stepContent: item.stepContent })),
       };
       await api.createTicket(payload);
       message.success('草稿已保存');
