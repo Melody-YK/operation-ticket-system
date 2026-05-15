@@ -142,6 +142,9 @@ export function TicketReviewPage() {
       } else if (currentAction === 'go_execute') {
         navigate(`/tickets/${id}/execute`);
         return;
+      } else if (currentAction === 'go_verify') {
+        navigate(`/tickets/${id}/verify`);
+        return;
       } else {
         await api.reviewTicket(id, currentAction, comment);
         message.success(currentAction === 'approve' ? '审核通过！' : '已驳回');
@@ -163,7 +166,7 @@ export function TicketReviewPage() {
   /** 点击操作按钮：需要确认的弹窗，无需确认的直接执行 */
   const handleAction = (action: string) => {
     // 无需弹窗确认的操作
-    if (action === 'start_execute' || action === 'go_execute') {
+    if (action === 'start_execute' || action === 'go_execute' || action === 'go_verify') {
       setCurrentAction(action);
       confirmAction();
       return;
