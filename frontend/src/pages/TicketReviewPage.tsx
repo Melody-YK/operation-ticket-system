@@ -7,6 +7,7 @@ import {
 import {
   CheckCircleOutlined, CloseCircleOutlined, SendOutlined,
   ArrowLeftOutlined, PlayCircleOutlined, EditOutlined,
+  SaveOutlined, CloseOutlined, PlusOutlined, MinusCircleOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { TicketStatusTag } from '../components/TicketStatusTag';
@@ -43,6 +44,8 @@ export function TicketReviewPage() {
   const [currentAction, setCurrentAction] = useState<string>('');
   const [comment, setComment] = useState('');
   const [statusInfo, setStatusInfo] = useState<any>(null);
+  const [editing, setEditing] = useState(false);
+  const [editForm] = Form.useForm();
 
   const role = user?.role || '';
 
@@ -122,8 +125,6 @@ export function TicketReviewPage() {
       } else if (currentAction === 'start_execute') {
         await api.startExecute(id);
         message.success('开始执行！');
-      } else if (currentAction === 'edit') {
-        message.warning('编辑功能尚未实现');
       } else if (currentAction === 'go_execute') {
         navigate(`/tickets/${id}/execute`);
         return;
@@ -148,14 +149,54 @@ export function TicketReviewPage() {
   /** 点击操作按钮：需要确认的弹窗，无需确认的直接执行 */
   const handleAction = (action: string) => {
     // 无需弹窗确认的操作
-    if (action === 'start_execute' || action === 'go_execute' || action === 'edit') {
+    if (action === 'start_execute' || action === 'go_execute') {
       setCurrentAction(action);
       confirmAction();
+      return;
+    }
+    // 编辑模式：初始化表单
+    if (action === 'edit') {
+      editForm.setFieldsValue({
+        taskName: ticket.taskName,
+        station: ticket.basicInfo?.station || '',
+        workType: ticket.basicInfo?.workType || '',
+        workTicketNo: ticket.workTicketNo || '',
+        items: ticket.items?.map((i: any) => ({ stepContent: i.stepContent })) || [{ stepContent: '' }],
+      });
+      setEditing(true);
       return;
     }
     setCurrentAction(action);
     setComment('');
     setModalVisible(true);
+  };
+
+  /** 保存编辑 */
+  const handleSaveEdit = async () => {
+    if (!id) return;
+    try {
+      const values = await editForm.validateFields();
+      setSubmitting(true);
+      const payload = {
+        taskName: values.taskName,
+        basicInfo: { station: values.station || '', workType: values.workType || '' },
+        workTicketNo: values.workTicketNo || null,
+        items: (values.items || []).map((item: any) => ({ stepContent: item.stepContent })),
+      };
+      await api.updateTicket(id, payload);
+      message.success('操作票已更新');
+      setEditing(false);
+      const [ticketData, statusData] = await Promise.all([
+        api.getTicket(id),
+        api.getTicketStatus(id),
+      ]);
+      setTicket(ticketData);
+      setStatusInfo(statusData);
+    } catch (e: any) {
+      if (e.message) message.error(e.message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (loading) return <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" tip="加载中..." /></div>;
@@ -170,39 +211,105 @@ export function TicketReviewPage() {
         <TicketStatusTag status={ticket.status} />
       </div>
 
-      <Card title="基本信息" style={{ marginBottom: 16 }}>
-        <Descriptions column={{ xs: 1, sm: 2, md: 3 }} size="small">
-          <Descriptions.Item label="票号"><Text code>{ticket.ticketId}</Text></Descriptions.Item>
-          <Descriptions.Item label="任务名称">{ticket.taskName}</Descriptions.Item>
-          <Descriptions.Item label="操作人">{ticket.operatorId}</Descriptions.Item>
-          <Descriptions.Item label="监护人">{ticket.supervisorId}</Descriptions.Item>
-          <Descriptions.Item label="批准人">{ticket.approverId}</Descriptions.Item>
-          <Descriptions.Item label="发令人">{ticket.dispatcherId}</Descriptions.Item>
-          <Descriptions.Item label="变电站">{ticket.basicInfo?.station || '-'}</Descriptions.Item>
-          <Descriptions.Item label="作业类型">{ticket.basicInfo?.workType || '-'}</Descriptions.Item>
-          <Descriptions.Item label="工作票号">{ticket.workTicketNo || '-'}</Descriptions.Item>
-          {ticket.dispatchTime && (
-            <Descriptions.Item label="下令时间">{new Date(ticket.dispatchTime).toLocaleString('zh-CN')}</Descriptions.Item>
-          )}
-        </Descriptions>
-      </Card>
+      {editing ? (
+        <Form form={editForm} layout="vertical">
+          <Card title="基本信息" style={{ marginBottom: 16 }}>
+            <Form.Item name="taskName" label="任务名称" rules={[{ required: true, message: '请输入任务名称' }]}>
+              <Input />
+            </Form.Item>
+            <Space style={{ width: '100%' }} size="middle">
+              <Form.Item name="station" label="变电站" style={{ flex: 1 }}>
+                <Input placeholder="如：110kV 变电站" />
+              </Form.Item>
+              <Form.Item name="workType" label="作业类型" style={{ flex: 1 }}>
+                <Input placeholder="如：检修 / 试验" />
+              </Form.Item>
+            </Space>
+            <Form.Item name="workTicketNo" label="工作票编号">
+              <Input placeholder="关联工作票编号（可选）" />
+            </Form.Item>
+          </Card>
 
-      <Card title={`操作内容（共 ${ticket.items?.length || 0} 项）`} style={{ marginBottom: 16 }}>
-        {ticket.items?.length > 0 ? (
-          <List
-            size="small"
-            dataSource={ticket.items}
-            renderItem={(item: any, index: number) => (
-              <List.Item>
-                <Space>
-                  <Tag color="blue">{index + 1}</Tag>
-                  <Text>{item.stepContent}</Text>
-                </Space>
-              </List.Item>
-            )}
-          />
-        ) : <Text type="secondary">无操作内容</Text>}
-      </Card>
+          <Card
+            title="操作内容"
+            style={{ marginBottom: 16 }}
+            extra={
+              <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={() => {
+                const items = editForm.getFieldValue('items') || [];
+                editForm.setFieldsValue({ items: [...items, { stepContent: '' }] });
+              }}>
+                添加步骤
+              </Button>
+            }
+          >
+            <Form.List name="items">
+              {(fields, { remove }) => (
+                <>
+                  {fields.map(({ key, name, ...restField }, index) => (
+                    <Space key={key} align="baseline" style={{ display: 'flex', marginBottom: 8 }}>
+                      <span style={{ minWidth: 24, fontWeight: 'bold', color: '#1677ff' }}>{index + 1}.</span>
+                      <Form.Item
+                        {...restField}
+                        name={[name, 'stepContent']}
+                        rules={[{ required: true, message: '请输入操作内容' }]}
+                        style={{ flex: 1, marginBottom: 0 }}
+                      >
+                        <Input placeholder={`第 ${index + 1} 步操作内容`} style={{ width: 400 }} />
+                      </Form.Item>
+                      {fields.length > 1 && (
+                        <MinusCircleOutlined onClick={() => remove(name)} style={{ color: '#ff4d4f' }} />
+                      )}
+                    </Space>
+                  ))}
+                </>
+              )}
+            </Form.List>
+          </Card>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 16 }}>
+            <Button icon={<CloseOutlined />} onClick={() => setEditing(false)}>取消</Button>
+            <Button type="primary" icon={<SaveOutlined />} loading={submitting} onClick={handleSaveEdit}>
+              保存修改
+            </Button>
+          </div>
+        </Form>
+      ) : (
+        <>
+          <Card title="基本信息" style={{ marginBottom: 16 }}>
+            <Descriptions column={{ xs: 1, sm: 2, md: 3 }} size="small">
+              <Descriptions.Item label="票号"><Text code>{ticket.ticketId}</Text></Descriptions.Item>
+              <Descriptions.Item label="任务名称">{ticket.taskName}</Descriptions.Item>
+              <Descriptions.Item label="操作人">{ticket.operatorId}</Descriptions.Item>
+              <Descriptions.Item label="监护人">{ticket.supervisorId}</Descriptions.Item>
+              <Descriptions.Item label="批准人">{ticket.approverId}</Descriptions.Item>
+              <Descriptions.Item label="发令人">{ticket.dispatcherId}</Descriptions.Item>
+              <Descriptions.Item label="变电站">{ticket.basicInfo?.station || '-'}</Descriptions.Item>
+              <Descriptions.Item label="作业类型">{ticket.basicInfo?.workType || '-'}</Descriptions.Item>
+              <Descriptions.Item label="工作票号">{ticket.workTicketNo || '-'}</Descriptions.Item>
+              {ticket.dispatchTime && (
+                <Descriptions.Item label="下令时间">{new Date(ticket.dispatchTime).toLocaleString('zh-CN')}</Descriptions.Item>
+              )}
+            </Descriptions>
+          </Card>
+
+          <Card title={`操作内容（共 ${ticket.items?.length || 0} 项）`} style={{ marginBottom: 16 }}>
+            {ticket.items?.length > 0 ? (
+              <List
+                size="small"
+                dataSource={ticket.items}
+                renderItem={(item: any, index: number) => (
+                  <List.Item>
+                    <Space>
+                      <Tag color="blue">{index + 1}</Tag>
+                      <Text>{item.stepContent}</Text>
+                    </Space>
+                  </List.Item>
+                )}
+              />
+            ) : <Text type="secondary">无操作内容</Text>}
+          </Card>
+        </>
+      )}
 
       {ticket.logs?.length > 0 && (
         <Card title="操作日志" style={{ marginBottom: 16 }}>
