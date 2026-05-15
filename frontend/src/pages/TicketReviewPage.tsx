@@ -6,7 +6,7 @@ import {
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, SendOutlined,
-  ArrowLeftOutlined,
+  ArrowLeftOutlined, PlayCircleOutlined, EditOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { TicketStatusTag } from '../components/TicketStatusTag';
@@ -67,8 +67,34 @@ export function TicketReviewPage() {
     return () => { cancelled = true; };
   }, [id]);
 
+  /** 操作人（OPERATOR）根据状态可执行的操作 */
+  const operatorActions = (() => {
+    if (role !== 'OPERATOR' || !ticket || user?.id !== ticket.operatorId) return [];
+    const status = ticket.status;
+    const actions: { action: string; label: string; icon: any; type?: 'primary' | 'default'; danger?: boolean }[] = [];
+
+    if (status === 'DRAFT') {
+      actions.push({ action: 'submit', label: '提交送审', icon: <SendOutlined />, type: 'primary' });
+      actions.push({ action: 'edit', label: '编辑', icon: <EditOutlined />, type: 'default' });
+    }
+    if (status === 'REJECTED') {
+      actions.push({ action: 'resubmit', label: '重新提交', icon: <SendOutlined />, type: 'primary' });
+      actions.push({ action: 'edit', label: '编辑', icon: <EditOutlined />, type: 'default' });
+    }
+    if (status === 'PENDING_EXECUTE') {
+      actions.push({ action: 'start_execute', label: '开始执行', icon: <PlayCircleOutlined />, type: 'primary' });
+    }
+    if (status === 'EXECUTING') {
+      actions.push({ action: 'go_execute', label: '前往执行', icon: <PlayCircleOutlined />, type: 'primary' });
+    }
+    return actions;
+  })();
+
   const availableActions = (() => {
     if (!statusInfo || !role) return [];
+    // 如果是 OPERATOR，用操作人自己的操作列表
+    if (role === 'OPERATOR') return operatorActions;
+
     const roleActions = ROLE_ACTIONS[role] || [];
     const allowedEvents = statusInfo.allowedActions?.map((a: any) => a.event) || [];
 
@@ -80,20 +106,27 @@ export function TicketReviewPage() {
     });
   })();
 
-  const handleAction = (action: string) => {
-    setCurrentAction(action);
-    setComment('');
-    setModalVisible(true);
-  };
-
   const confirmAction = async () => {
     if (!id) return;
     setSubmitting(true);
     try {
       if (currentAction === 'approve_and_dispatch') {
-        // 发令人审核→下达指令：backend review() 在 PENDING_DISPATCHER + approve 时自动写入 dispatchTime
         await api.reviewTicket(id, 'approve', comment);
         message.success('审核通过并下达指令成功！');
+      } else if (currentAction === 'submit') {
+        await api.submitTicket(id);
+        message.success('已提交送审！');
+      } else if (currentAction === 'resubmit') {
+        await api.resubmitTicket(id);
+        message.success('已重新提交！');
+      } else if (currentAction === 'start_execute') {
+        await api.startExecute(id);
+        message.success('开始执行！');
+      } else if (currentAction === 'edit') {
+        message.warning('编辑功能尚未实现');
+      } else if (currentAction === 'go_execute') {
+        navigate(`/tickets/${id}/execute`);
+        return;
       } else {
         await api.reviewTicket(id, currentAction, comment);
         message.success(currentAction === 'approve' ? '审核通过！' : '已驳回');
@@ -110,6 +143,19 @@ export function TicketReviewPage() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  /** 点击操作按钮：需要确认的弹窗，无需确认的直接执行 */
+  const handleAction = (action: string) => {
+    // 无需弹窗确认的操作
+    if (action === 'start_execute' || action === 'go_execute' || action === 'edit') {
+      setCurrentAction(action);
+      confirmAction();
+      return;
+    }
+    setCurrentAction(action);
+    setComment('');
+    setModalVisible(true);
   };
 
   if (loading) return <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" tip="加载中..." /></div>;
