@@ -197,6 +197,47 @@ export class TicketsService {
     if (dto.workTicketNo !== undefined) updateData.workTicketNo = dto.workTicketNo;
     if (dto.remarks !== undefined) updateData.remarks = dto.remarks;
 
+    // 构建变更描述（仅记录实际有变化的内容）
+    const changes: string[] = [];
+
+    if (dto.taskName !== undefined && dto.taskName !== ticket.taskName) {
+      changes.push(`任务名称: "${ticket.taskName}" → "${dto.taskName}"`);
+    }
+
+    if (dto.basicInfo !== undefined) {
+      const oldBasic = ticket.basicInfo || {};
+      const newBasic = dto.basicInfo as any;
+      if (newBasic.station !== undefined && newBasic.station !== oldBasic.station) {
+        changes.push(`变电站: "${oldBasic.station || '-'}" → "${newBasic.station}"`);
+      }
+      if (newBasic.workType !== undefined && newBasic.workType !== oldBasic.workType) {
+        changes.push(`作业类型: "${oldBasic.workType || '-'}" → "${newBasic.workType}"`);
+      }
+    }
+
+    if (dto.workTicketNo !== undefined && dto.workTicketNo !== ticket.workTicketNo) {
+      changes.push(`工作票编号: "${ticket.workTicketNo || '-'}" → "${dto.workTicketNo}"`);
+    }
+
+    // 检查操作项是否有变化
+    if (dto.items) {
+      const oldItems = ticket.items || [];
+      const oldSteps = oldItems.map((i: any) => i.stepContent);
+      const newSteps = dto.items.map((i: OperationItemDto) => i.stepContent);
+
+      const oldSummary = oldSteps.map((s: string, idx: number) => `${idx + 1}. ${s}`).join(' | ');
+      const newSummary = newSteps.map((s: string, idx: number) => `${idx + 1}. ${s}`).join(' | ');
+
+      if (oldSummary !== newSummary) {
+        changes.push(`操作步骤已更新（${oldItems.length} 项 → ${dto.items.length} 项）`);
+      }
+    }
+
+    // 无任何变化则不执行更新
+    if (changes.length === 0) {
+      return ticket;
+    }
+
     await this.prisma.operationTicket.update({
       where: { ticketId: id },
       data: updateData,
@@ -218,7 +259,7 @@ export class TicketsService {
       ticketId: id,
       operatorId: userId,
       actionNode: 'update',
-      detail: '更新操作票信息',
+      detail: `更新操作票信息: ${changes.join('；')}`,
       previousStatus: ticket.status,
       newStatus: ticket.status,
     });
