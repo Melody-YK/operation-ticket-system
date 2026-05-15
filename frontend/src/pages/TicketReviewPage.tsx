@@ -8,6 +8,7 @@ import {
   CheckCircleOutlined, CloseCircleOutlined, SendOutlined,
   ArrowLeftOutlined, PlayCircleOutlined, EditOutlined,
   SaveOutlined, CloseOutlined, PlusOutlined, MinusCircleOutlined,
+  VerifyOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { TicketStatusTag } from '../components/TicketStatusTag';
@@ -93,6 +94,15 @@ export function TicketReviewPage() {
     return actions;
   })();
 
+  /** 发令人校验入口 */
+  const dispatcherPostActions = (() => {
+    if (role !== 'DISPATCHER' || !ticket) return [];
+    if (ticket.status === 'COMPLETED') {
+      return [{ action: 'go_verify', label: '前往校验', icon: <VerifyOutlined />, type: 'primary' as const }];
+    }
+    return [];
+  })();
+
   const availableActions = (() => {
     if (!statusInfo || !role) return [];
     // 如果是 OPERATOR，用操作人自己的操作列表
@@ -100,6 +110,10 @@ export function TicketReviewPage() {
 
     const roleActions = ROLE_ACTIONS[role] || [];
     const allowedEvents = statusInfo.allowedActions?.map((a: any) => a.event) || [];
+
+    // 发令人在 COMPLETED 状态下显示"前往校验"
+    const postActions = role === 'DISPATCHER' ? dispatcherPostActions : [];
+    if (postActions.length > 0) return postActions;
 
     return roleActions.filter(a => {
       if (a.action === 'approve') return allowedEvents.includes('approve');

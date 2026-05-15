@@ -298,7 +298,7 @@ export class TicketsService {
 
     // 3. 执行迁移
     const updateData: any = { status: targetStatus, ...extraUpdate };
-    const updated = await this.prisma.operationTicket.update({
+    await this.prisma.operationTicket.update({
       where: { ticketId: id },
       data: updateData,
     });
@@ -317,7 +317,8 @@ export class TicketsService {
       newStatus: targetStatus,
     });
 
-    return updated;
+    // 6. 返回完整票据（含 items 等关联数据）
+    return this.findOne(id);
   }
 
   /**
