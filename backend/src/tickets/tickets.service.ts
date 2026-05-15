@@ -198,32 +198,34 @@ export class TicketsService {
     if (dto.remarks !== undefined) updateData.remarks = dto.remarks;
 
     // 构建变更描述（仅记录实际有变化的内容）
+    // 注意：数据库中的空值可能是 null / undefined / ''，统一标准化后再比较
+    const normalize = (v: any) => (v === null || v === undefined ? '' : v);
     const changes: string[] = [];
 
-    if (dto.taskName !== undefined && dto.taskName !== ticket.taskName) {
-      changes.push(`任务名称: "${ticket.taskName}" → "${dto.taskName}"`);
+    if (dto.taskName !== undefined && normalize(dto.taskName) !== normalize(ticket.taskName)) {
+      changes.push(`任务名称: "${ticket.taskName || '-'}" → "${dto.taskName}"`);
     }
 
     if (dto.basicInfo !== undefined) {
       const oldBasic = ticket.basicInfo || {};
       const newBasic = dto.basicInfo as any;
-      if (newBasic.station !== undefined && newBasic.station !== oldBasic.station) {
+      if (newBasic.station !== undefined && normalize(newBasic.station) !== normalize(oldBasic.station)) {
         changes.push(`变电站: "${oldBasic.station || '-'}" → "${newBasic.station}"`);
       }
-      if (newBasic.workType !== undefined && newBasic.workType !== oldBasic.workType) {
+      if (newBasic.workType !== undefined && normalize(newBasic.workType) !== normalize(oldBasic.workType)) {
         changes.push(`作业类型: "${oldBasic.workType || '-'}" → "${newBasic.workType}"`);
       }
     }
 
-    if (dto.workTicketNo !== undefined && dto.workTicketNo !== ticket.workTicketNo) {
+    if (dto.workTicketNo !== undefined && normalize(dto.workTicketNo) !== normalize(ticket.workTicketNo)) {
       changes.push(`工作票编号: "${ticket.workTicketNo || '-'}" → "${dto.workTicketNo}"`);
     }
 
     // 检查操作项是否有变化
     if (dto.items) {
       const oldItems = ticket.items || [];
-      const oldSteps = oldItems.map((i: any) => i.stepContent);
-      const newSteps = dto.items.map((i: OperationItemDto) => i.stepContent);
+      const oldSteps = oldItems.map((i: any) => normalize(i.stepContent));
+      const newSteps = dto.items.map((i: OperationItemDto) => normalize(i.stepContent));
 
       const oldSummary = oldSteps.map((s: string, idx: number) => `${idx + 1}. ${s}`).join(' | ');
       const newSummary = newSteps.map((s: string, idx: number) => `${idx + 1}. ${s}`).join(' | ');
