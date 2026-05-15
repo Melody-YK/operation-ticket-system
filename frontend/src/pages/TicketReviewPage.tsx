@@ -8,7 +8,7 @@ import {
   CheckCircleOutlined, CloseCircleOutlined, SendOutlined,
   ArrowLeftOutlined, PlayCircleOutlined, EditOutlined,
   SaveOutlined, CloseOutlined, PlusOutlined, MinusCircleOutlined,
-  VerifyOutlined,
+  AuditOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { TicketStatusTag } from '../components/TicketStatusTag';
@@ -98,7 +98,7 @@ export function TicketReviewPage() {
   const dispatcherPostActions = (() => {
     if (role !== 'DISPATCHER' || !ticket) return [];
     if (ticket.status === 'COMPLETED') {
-      return [{ action: 'go_verify', label: '前往校验', icon: <VerifyOutlined />, type: 'primary' as const }];
+      return [{ action: 'go_verify', label: '前往校验', icon: <AuditOutlined />, type: 'primary' as const }];
     }
     return [];
   })();
