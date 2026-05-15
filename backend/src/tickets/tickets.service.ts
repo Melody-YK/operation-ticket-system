@@ -473,7 +473,23 @@ export class TicketsService {
     }
 
     // 根据驳回来源确定目标审核节点
-    const rejectedFrom = ticket.rejectedFromStatus || 'PENDING_SUPERVISOR';
+    // 优先使用票证上的 rejectedFromStatus（新数据），
+    // 若无则从操作日志中推导（兼容旧数据）
+    let rejectedFrom = ticket.rejectedFromStatus;
+    if (!rejectedFrom) {
+      const rejectLog = await this.prisma.operationLog.findFirst({
+        where: { ticketId: id, actionNode: 'reject' },
+        orderBy: { actionTime: 'desc' },
+      });
+      if (rejectLog?.actionDetail) {
+        try {
+          const parsed = JSON.parse(rejectLog.actionDetail);
+          rejectedFrom = parsed.previousStatus;
+        } catch { /* ignore */ }
+      }
+    }
+    rejectedFrom = rejectedFrom || 'PENDING_SUPERVISOR';
+
     const targetMap: Record<string, string> = {
       'PENDING_SUPERVISOR': 'PENDING_SUPERVISOR',
       'PENDING_APPROVER': 'PENDING_APPROVER',
