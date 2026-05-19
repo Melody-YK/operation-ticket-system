@@ -1577,7 +1577,6 @@ sequenceDiagram
         System-->>Dispatcher: 16. 副本创建成功，进入副本管理
     end
 
-    deactivate System
     System-->>Operator: 17. 通知操作人中止完成
 ```
 
